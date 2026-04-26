@@ -6,12 +6,12 @@ DarkVis Beta 1.5 Code - init.cpp
 Copyright (C) 2001 by DarKnight (ICQ: 76468699, eMail: darknight@deltaeagle.net)
 
 Teile des Codes basieren auf dem Initierungscode von NeHe (nehe.gamedev.net)
-oder dem VIS SDK für Winamp von Nullsoft (www.winamp.com).
+oder dem VIS SDK fÑŒr Winamp von Nullsoft (www.winamp.com).
 
-Sie sind berechtigt diesen Code beliebig zu verändern und auch diesen
+Sie sind berechtigt diesen Code beliebig zu verÐ´ndern und auch diesen
 Code weiterzugeben. Allerdings ist es ihnen nicht gestattet, Elemente dieses
-Codes in kommerziellen Produkten zu verwenden. Ausserdem würde ich mich als
-Entwickler des Ursprungscodes darüber freuen über alle Veränderungen aufgeklärt
+Codes in kommerziellen Produkten zu verwenden. Ausserdem wÑŒrde ich mich als
+Entwickler des Ursprungscodes darÑŒber freuen ÑŒber alle VerÐ´nderungen aufgeklÐ´rt
 zu werden.
 
 ---
@@ -21,7 +21,7 @@ Alle externen Effekte befinden sich hier
 */
 
 //------------------------------------------------------------------------------
-
+#define _CRT_SECURE_NO_WARNINGS
 #include "init.h"
 
 extern int beatsecond;
@@ -115,7 +115,7 @@ void getbeat()
 //------------------------------------------------------------------------------
 
 //+++++++++++++++++++++++++++++++++++
-//Renderfunktion für die Blur-Graphen
+//Renderfunktion fÑŒr die Blur-Graphen
 //+++++++++++++++++++++++++++++++++++
 
 void renderblur(int index)
@@ -165,7 +165,7 @@ void renderblur(int index)
 //------------------------------------------------------------------------------
 
 //+++++++++++++++++++++++++++++++++++
-//Funktion für den Text Effekt
+//Funktion fÑŒr den Text Effekt
 //+++++++++++++++++++++++++++++++++++
 
 void TextEffekt(char* string)
