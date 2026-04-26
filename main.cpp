@@ -1,7 +1,7 @@
 /*
 DIESER VERTRAG DARF AUS KEINER WEITERENTWICKELTEN VERSION DIESES PLUGINS ENTFERNT WERDEN!
 
-DarkVis Beta 1.5 Code - init.cpp
+DarkVis Beta 1.5 Code - main.cpp
 
 Copyright (C) 2001 by DarKnight (ICQ: 76468699, eMail: darknight@deltaeagle.net)
 
@@ -16,694 +16,1356 @@ zu werden.
 
 ---
 
-Hier finden sie den OpenGL Initialisierungscode sowie verschiedene Funktionen,
-die etwas mit Initialisierung der Komponenten zu tun haben.
-
+Hier befindet sich der Hauptcode von DarkVis mit allen Funktionen
+Die Kommentare von mir sind zwar sehr dьrftig sollten aber
+trotzdem einen kleinen Ьberblick ьber den Code verschaffen. Die meissten Kommentare
+sind in Deutsch, einige auch Englisch. Die Englischen Kommentare stammen
+grцsstenteils aus NeHe's OpenGL Initierungscode. Die restlichen sind
+ьbriggebliebene Kommentare aus dem Winamp VIS SDK.
 */
 
 //------------------------------------------------------------------------------
 #define _CRT_SECURE_NO_WARNINGS
 #include "init.h"
-#include <windows.h>
-#include <GL/gl.h>
-#include <stdio.h>// или <stdio.h>
-#include <string.h>
 
-// Объявляем структуру сами — она жила в glaux.h и умерла вместе с ним
-struct AUX_RGBImageRec {
-	int sizeX;
-	int sizeY;
-	unsigned char* data;
-};
-// Простой загрузчик BMP для замены auxDIBImageLoad
-AUX_RGBImageRec* LoadBMP(const char* filename) {
-	FILE* file = fopen(filename, "rb");
-	if (!file) return nullptr;
+HDC			hDC = NULL;					// permanent rendering context
+HWND        hwnd = NULL;				// private gdi device context
+HGLRC		hRC = NULL;					// holds our window handle
 
-	BITMAPFILEHEADER fileHeader;
-	fread(&fileHeader, sizeof(BITMAPFILEHEADER), 1, file);
+bool        keys[256];					// array used for the keyboard routine
+bool        active = true;				// window active flag set to true by default
+bool        fullscreen = true;			// fullscreen flag set to fullscreen mode by default
 
-	// Проверяем, что это BMP
-	if (fileHeader.bfType != 0x4D42) {
-		fclose(file);
-		return nullptr;
-	}
+GLuint	base;
+GLYPHMETRICSFLOAT gmf[256];
+GLfloat fogColor[4] = { 0.2f, 0.2f, 0.2f, 1.0f };
 
-	BITMAPINFOHEADER infoHeader;
-	fread(&infoHeader, sizeof(BITMAPINFOHEADER), 1, file);
+int config_x = 50;
+int config_y = 50;
 
-	// Ищем начало данных пикселей
-	fseek(file, fileHeader.bfOffBits, SEEK_SET);
+int framerate = 10;						//Anzahl der Millisekunden nach denen ein neuer Frame gerendert wird
 
-	int width = infoHeader.biWidth;
-	int height = infoHeader.biHeight;
-	int size = width * height * 3; // 24-бит
+int halfblur = int(blurcount / 2);
 
-	unsigned char* data = new unsigned char[size];
-	fread(data, sizeof(unsigned char), size, file);
-	fclose(file);
+//Einrichtung der Arrays
 
-	// BMP хранит BGR, переворачиваем в RGB
-	for (int i = 0; i < size; i += 3) {
-		unsigned char temp = data[i];
-		data[i] = data[i + 2];
-		data[i + 2] = temp;
-	}
+Graph graph[2];
 
-	// Создаем структуру, аналогичную возврату auxDIBImageLoad
-	AUX_RGBImageRec* image = new AUX_RGBImageRec;
-	image->sizeX = width;
-	image->sizeY = height;
-	image->data = data;
-	return image;
-}
+Graph* blur = new Graph[blurcount];
+Point* point = new Point[planetcount];
+Point* worm = new Point[planetcount];
+Point* peaks = new Point[peakcount];
+Star* stars = new Star[starcount];
+int* ticks = new int[halfblur];
 
-// Не забыть функцию очистки памяти, которую обычно вызывали после загрузки текстуры
-void FreeBMPImage(AUX_RGBImageRec* image) {
-	if (image) {
-		delete[] image->data;
-		delete image;
-	}
-}
-extern HDC			hDC;
-extern HWND			hwnd;
-extern HGLRC		hRC;
+extern int beats[2][4];
 
-extern bool        keys[256];
-extern bool        active;
-extern bool        fullscreen;
+//Speicherbare Einstellungen
 
-extern GLuint	base;
-extern GLYPHMETRICSFLOAT gmf[256];
-extern GLfloat fogColor[4];
+bool fog = false;						//Ist der Nebel aktiviert?
+bool randomc = true;					//Sind Zufallsfarben aktiviert?
+bool texteffekt = false;				//Ist ein Texteffekt im Moment aktiv?
+bool spectrum = true;					//Sollen die Graphen als Spektrum oder als Wavedata angezeigt werden?
+bool connections = true;				//Sind Verbindungen zwischen den Blur-Graphen aktiviert?
+bool solid = false;						//Soll "Solid" gerendert werden (nicht richtig implementiert)?
+bool landscape = false;					//Ist der "Landscape" Modus aktiviert?
+bool anti = false;						//Ist OpenGL-Line-Anti Aliasing aktiviert?
+bool songdisplayed = true;				//Wurde der Name des aktuell abgespielten Titels schon angezeigt?
+bool actpeaks = true;					//Sind die Peaks aktiviert?
+bool scientific = false;				//"Wissenschaftlicher" Modus aktiviert?
+bool whipping = true;					//Ist der "wippende" Effekt aktiviert?
+bool beatdetection = false;				//Beatdetection ist aus
 
-extern int config_x;
-extern int config_y;
+int r, g, b;							//Farben des Wurmlochs
+int r2, g2, b2;
 
-extern int framerate;
+float fallspeed = 0.0001f;
 
-extern bool fog;						//Ist der Nebel aktiviert?
-extern bool randomc;					//Sind Zufallsfarben aktiviert?
-extern bool spectrum;					//Sollen die Graphen als Spektrum oder als Wavedata angezeigt werden?
-extern bool connections;				//Sind Verbindungen zwischen den Blur-Graphen aktiviert?
-extern bool solid;						//Soll "Solid" gerendert werden (nicht richtig implementiert)?
-extern bool landscape;					//Ist der "Landscape" Modus aktiviert?
-extern bool anti;						//Ist OpenGL-Line-Anti Aliasing aktiviert?
-extern bool actpeaks;					//Sind die Peaks aktiviert?
-extern bool scientific;					//Ist der Scientific Mode aktiviert?
-
-extern int r, g, b;						//Farben des Wurmlochs
-extern int r2, g2, b2;
-
-extern int modeset;
+int planetcount = 30;					//Anzahl der "Striche" aus denen das Wurmloch besteht
+int blurcount = 15;						//Anzahl der Graphen, die im Hintergrund sind
+int starcount = 1000;					//Anzahl der Sterne im Hintergrund
+int peakcount = 30;						//Anzahl der Peaks
+int connectioncount = 10;				//Anzahl der Verbindungen zwischen den Blur-Graphen
 
 //------------------------------------------------------------------------------
 
-//+++++++++++++++++++++++++++
-//OpenGL initiation Functions
-//+++++++++++++++++++++++++++
+int pointcount = pointc;
 
-GLvoid resizeglscene(GLsizei width, GLsizei height)		// resize and initialize the gl window
+int x;
 
-{
-	if (height == 0)										// prevent a divide by zero by
-	{
-		height = 1;										// making height equal one
-	}
+int tmpradius, tmpangle, tmpspeed;
 
-	glViewport(0, 0, width, height);					// reset the current viewport
+int frames;
+int ticker;
 
-	glMatrixMode(GL_PROJECTION);						// select the projection matrix
-	glLoadIdentity();									// reset the projection matrix
+int modeset = 0;
 
-	// calculate the aspect ratio of the window
-	gluPerspective(45.0f, (GLfloat)width / (GLfloat)height, 0.1f, 100.0f);
+int beatsecond = 0;
+float bpm = 0;
+int tmp_ticks;
 
-	glMatrixMode(GL_MODELVIEW);							// select the modelview matrix
-	glLoadIdentity();									// reset the modelview matrix
-}
+float zadd;
+int cadd = 1;
 
-//------------------------------------------------------------------------------
+float zturn = 0;
+float zturnadd = 0.5f;
 
-int initgl(GLvoid)											// all setup for opengl goes here
+float zmove = 0.0f;
+float yturn = 0.0f;
 
-{
-	glShadeModel(GL_SMOOTH);								// enables smooth shading
-	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);					// black background
-	glClearDepth(1.0);
-	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);					// depth buffer setup
-	glEnable(GL_DEPTH_TEST);								// enables depth testing
-	glDepthFunc(GL_LEQUAL);									// the type of depth test to do
-	glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST);		// really nice perspective calculations
+float textz;
 
-	return true;											// initialization went ok
-}
+float frameratio;
+float floatticks;
+
+char title[256];
+char soundtitle[256];
+char cframes[256];
+char textstring[256];
 
 //------------------------------------------------------------------------------
 
-GLvoid killglwindow(GLvoid)									// properly kill the window
+HWND hwndwinamp = NULL;					//Handle des Winamp Fensters
+
+// returns a winampvismodule when requested. used in hdr, below
+winampVisModule* getModule(int which);
+
+// "member" functions
+void config(struct winampVisModule* this_mod); // configuration dialog
+int init(struct winampVisModule* this_mod);	   // initialization for module
+int render(struct winampVisModule* this_mod);
+void quit(struct winampVisModule* this_mod);   // deinitialization for module
+
+void renderblur(int index);
+void TextEffekt(char* string);
+
+//------------------------------------------------------------------------------
+
+//++++++++++++++++
+//Drawing Function
+//++++++++++++++++
+
+int drawglscene(GLvoid)
 
 {
+	float r_, g_, b_, r2_, g2_, b2_;
+	int i, k;
+	float temp_z, temp_y1, temp_y2;
 
-	if (fullscreen)											// Are We In Fullscreen Mode?
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glLoadIdentity();
+
+	if (whipping)
+		glRotatef(zturn, 0, 0, 1.0);	//um die z Achse drehen                                  
+
+	glRotatef(yturn, 0, 1.0, 0);	//um die y Achse drehen
+
+	if (!landscape || scientific)
+		glTranslatef(0, 0, zmove);
+
+	else
+		glTranslatef(0, -0.025f, 0.095f);
+
+
+	if (anti)
+		glEnable(GL_LINE_SMOOTH);
+
+	//	glLineWidth(2.0); 
+
+	//----------------- Zeichnen des Scientific Modes ------------------------
+
+	glColor3f(float(graph[0].r) / 255, float(graph[0].g) / 255, float(graph[0].b) / 255);
+
+	if (scientific)
 
 	{
-		ChangeDisplaySettings(NULL, 0);						// If So Switch Back To The Desktop
-		ShowCursor(TRUE);									// Show Mouse Pointer
+		glBegin(GL_LINES);
+		glVertex3f(-0.052f, -0.03f, graph[0].z);
+		glVertex3f(-0.052f, 0.03f, graph[0].z);
+
+		glVertex3f(0.052f, -0.03f, graph[0].z);
+		glVertex3f(0.052f, 0.03f, graph[0].z);
+
+		glVertex3f(-0.052f, -0, graph[0].z);
+		glVertex3f(0.052f, 0, graph[0].z);
+
+		glEnd();
 
 	}
 
-	if (hRC)												// Do We Have A Rendering Context?
-	{
+	//----------------- Zeichnen beider Haupt-Graphen ------------------------
 
-		if (!wglMakeCurrent(NULL, NULL))						// Are We Able To Release The DC And RC Contexts?
+	for (int j = 0; j < 2; j++)
+
+	{
+		if (graph[j].active)
 
 		{
-			MessageBox(NULL, L"Release Of DC And RC Failed.", L"SHUTDOWN ERROR", MB_OK | MB_ICONINFORMATION);
+
+			for (i = 1; i < pointcount; i++)
+
+			{
+				glColor3f(float(graph[j].r) / 255, float(graph[j].g) / 255, float(graph[j].b) / 255);
+
+
+				glBegin(GL_LINES);
+
+				if (!spectrum)
+
+				{
+					glVertex3f(graph[j].x[i - 1] / (pointcount * 10), graph[j].y[i - 1] / 40000, graph[j].z);
+					glVertex3f(graph[j].x[i] / (pointcount * 10), graph[j].y[i] / 40000, graph[j].z);
+				}
+
+				else
+
+				{
+					if (j == 1)
+					{
+						glVertex3f(graph[j].x[i - 1] / (pointcount * 10), graph[j].y[i - 1] / 40000, graph[j].z);
+						glVertex3f(graph[j].x[i] / (pointcount * 10), graph[j].y[i] / 40000, graph[j].z);
+					}
+
+					else
+					{
+						glVertex3f(graph[j].x[i - 1] / (pointcount * 10), graph[j].y[i - 1] / 10000, graph[j].z);
+						glVertex3f(graph[j].x[i] / (pointcount * 10), graph[j].y[i] / 10000, graph[j].z);
+					}
+
+				}
+
+				glEnd();
+
+			}
+		}
+	}
+
+	//----------------- Zeichnen der Peaks ------------------------
+
+	float temp_y;
+	int j = 0;
+
+	if (actpeaks)
+
+	{
+		glLineWidth(2.0);
+
+		for (i = 0; i < pointcount; i += pointcount / peakcount)
+
+		{
+			if (i < pointcount && j < peakcount)
+
+			{
+				glColor3f(float(graph[0].r) / 255, float(graph[0].g) / 255, float(graph[0].b) / 255);
+
+				glBegin(GL_LINES);
+
+				if (!spectrum)
+
+				{
+					if (peaks[j].y <= float(graph[0].y[i] / 40000))
+					{
+						temp_y = float(graph[0].y[i] / 40000);
+						peaks[j].y = temp_y;
+
+						if (beatdetection)
+
+						{
+							if (j == 0)
+							{
+								beats[0][beatsecond]++;
+							}
+
+							if (j == 1)
+							{
+								beats[1][beatsecond]++;
+							}
+						}
+					}
+
+					else
+						temp_y = peaks[j].y;
+
+					glVertex3f((graph[0].x[i] / (peakcount * int((90 / (peakcount / 10))))) - 0.0007f, temp_y, float(graph[0].z));
+					glVertex3f((graph[0].x[i] / (peakcount * int((90 / (peakcount / 10))))) + 0.0007f, temp_y, float(graph[0].z));
+				}
+
+				else
+
+				{
+
+					if (peaks[j].y <= float(graph[0].y[i] / 10000))
+					{
+						temp_y = float(graph[0].y[i] / 10000);
+						peaks[j].y = temp_y;
+
+						if (beatdetection)
+
+						{
+							if (j == 0)
+							{
+								beats[0][beatsecond]++;
+							}
+
+							if (j == 1)
+							{
+								beats[1][beatsecond]++;
+							}
+						}
+					}
+
+					else
+					 temp_y = peaks[j].y;
+
+					glVertex3f((graph[0].x[i] / (peakcount * int((90 / (peakcount / 10))))) - 0.0007f, temp_y, float(graph[0].z));
+					glVertex3f((graph[0].x[i] / (peakcount * int((90 / (peakcount / 10))))) + 0.0007f, temp_y, float(graph[0].z));
+				}
+
+				glEnd();
+
+				j++;
+			}
+		}
+	}
+
+	//----------------- Zeichnen der Blur-Graphen ------------------------
+
+	glLineWidth(1.0);
+
+for (j = 1; j < blurcount; j++)
+
+	{
+
+		for (i = 1; i < pointcount; i++)
+
+		{
+			glColor3f(float(blur[j].r) / 255, float(blur[j].g) / 255, float(blur[j].b) / 255);
+
+			glBegin(GL_LINES);
+
+			if (!spectrum)
+				k = 40000;
+			else
+				k = 10000;
+
+			temp_z = float(graph[0].z - (j * 0.1f));
+
+			if (!scientific)
+			{
+				temp_y1 = float(blur[j].y[i - 1] / k + (j * 0.015));
+				temp_y2 = float(blur[j].y[i] / k + (j * 0.015));
+			}
+			else
+			{
+				temp_y1 = float(blur[j].y[i - 1] / k + (j * 0.03));
+				temp_y2 = float(blur[j].y[i] / k + (j * 0.03));
+			}
+
+			glVertex3f(blur[j].x[i - 1] / (pointcount * 10), temp_y1, temp_z);
+			glVertex3f(blur[j].x[i] / (pointcount * 10), temp_y2, temp_z);
+
+			glEnd();
 
 		}
+	}
 
-		if (!wglDeleteContext(hRC))							// Are We Able To Delete The RC?
+	//----------------- Zeichnen der Verbindungen zwischen den Graphen ------------------------
+
+	if (connections)
+
+	{
+		if (!solid)
 
 		{
 
-			MessageBox(NULL, L"Release Rendering Context Failed.", L"SHUTDOWN ERROR", MB_OK | MB_ICONINFORMATION);
-
-		}
-		hRC = NULL;											// Set RC To NULL
-	}
-
-	if (hDC && !ReleaseDC(hwnd, hDC))						// Are We Able To Release The DC
-
-	{
-		//		MessageBox(NULL,"Release Device Context Failed.","SHUTDOWN ERROR",MB_OK | MB_ICONINFORMATION);
-		hDC = NULL;											// Set DC To NULL
-	}
-
-	if (hwnd && !DestroyWindow(hwnd))						// Are We Able To Destroy The Window?
-
-	{
-		//		MessageBox(NULL,"Could Not Release hWnd.","SHUTDOWN ERROR",MB_OK | MB_ICONINFORMATION);
-		hwnd = NULL;											// Set hWnd To NULL
-
-	}
-
-
-
-}
-
-//------------------------------------------------------------------------------
-
-bool createglwindow(char* title, int width, int height, int bits, bool fullscreenflag, winampVisModule* this_mod)
-
-{
-	GLuint					pixelformat;                                // holds the results after searching for a match
-	HINSTANCE				hinstance;									// holds the instance of the application
-	WNDCLASS				wc;											// windows class structure
-	DWORD					dwexstyle;									// window extended style
-	DWORD					dwstyle;									// window style
-
-	fullscreen = fullscreenflag;											// set the global fullscreen flag
-
-	hinstance = GetModuleHandle(NULL);						// grab an instance for our window
-	wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;			// redraw on move, and own dc for window
-	wc.lpfnWndProc = (WNDPROC)WndProc;							// wndproc handles messages
-	wc.cbClsExtra = 0;											// no extra window data
-	wc.cbWndExtra = 0;											// no extra window data
-	wc.hInstance = this_mod->hDllInstance; //hinstance;
-	wc.hIcon = LoadIcon(NULL, IDI_WINLOGO);					// load the default icon
-	wc.hCursor = LoadCursor(NULL, IDC_ARROW);					// load the arrow pointer
-	wc.hbrBackground = NULL;											// no background required for gl
-	wc.lpszMenuName = NULL;											// we don't want a menu
-	wc.lpszClassName = L"OpenGL";										// set the class name
-
-	if (!RegisterClass(&wc))                                        // attempt to register the window class
-
-	{
-		MessageBox(NULL, L"failed to register the window class.", L"error", MB_OK | MB_ICONEXCLAMATION);
-		return false;												// exit and return false
-	}
-
-	if (fullscreen)													// attempt fullscreen mode?
-
-	{
-
-		DEVMODE dmscreensettings;										// device mode
-		memset(&dmscreensettings, 0, sizeof(dmscreensettings));			// makes sure memory's cleared
-		dmscreensettings.dmSize = sizeof(dmscreensettings);				// size of the devmode structure
-		dmscreensettings.dmPelsWidth = width;					// selected screen width
-		dmscreensettings.dmPelsHeight = height;					// selected screen height
-		dmscreensettings.dmBitsPerPel = bits;					// selected bits per pixel
-		dmscreensettings.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
-
-		// try to set selected mode and get results.  note: cds_fullscreen gets rid of start bar.
-		if (ChangeDisplaySettings(&dmscreensettings, CDS_FULLSCREEN) != DISP_CHANGE_SUCCESSFUL)
-
-		{
-
-			// if the mode fails, offer two options.  quit or run in a window.
-			if (MessageBox(NULL, L"the requested fullscreen mode is not supported by\nyour video card. use windowed mode instead?", L"opengl test", MB_YESNO | MB_ICONEXCLAMATION) == IDYES)
+			for (j = 0; j < blurcount; j++)
 
 			{
 
-				fullscreen = false;										// select windowed mode (fullscreen=false)
+				for (i = 1; i < pointcount; i += pointcount / connectioncount - 1)
 
+				{
+					glColor3f(float(blur[j].r) / 255, float(blur[j].g) / 255, float(blur[j].b) / 255);
+
+					if (j != pointcount && j != 0 && j != blurcount - 1)
+
+					{
+
+						if (!spectrum)
+							k = 40000;
+						else
+							k = 10000;
+
+						temp_z = float(graph[0].z - (j * 0.1f));
+
+						if (!scientific)
+						{
+							temp_y1 = float(blur[j].y[i - 1] / k + (j * 0.015));
+							temp_y2 = float(blur[j + 1].y[i] / k + ((j + 1) * 0.015));
+						}
+						else
+						{
+							temp_y1 = float(blur[j].y[i - 1] / k + (j * 0.03));
+							temp_y2 = float(blur[j + 1].y[i] / 40000 + ((j + 1) * 0.03));
+						}
+
+						glBegin(GL_LINES);
+
+						glVertex3f(blur[j].x[i] / (pointcount * 10), temp_y1, float(graph[0].z - (j * 0.1)));
+						glVertex3f(blur[j + 1].x[i] / (pointcount * 10), temp_y2, float(graph[0].z - ((j + 1) * 0.1)));
+
+						glEnd();
+
+					}
+
+				}
+			}
+
+		}
+
+		//Solid sollte jeden Punkt der Linien mit QUADS verbinden. 
+		//Allerdings ist mir das noch nicht ganz gelungen. Versucht euch dran, 
+		//dьrfte einfach sein hab aber keinen Bock gehabt. =)
+
+		else
+
+		{
+
+			for (j = 0; j < blurcount; j++)
+
+			{
+
+				for (i = 1; i < pointcount; i += pointcount / connectioncount - 1)
+
+				{
+					glColor3f(float(blur[j].r) / 255, float(blur[j].g) / 255, float(blur[j].b) / 255);
+
+					if (j != pointcount && j != 0 && j != blurcount - 1)
+
+					{
+						glBegin(GL_QUADS);
+
+						if (!spectrum)
+						{
+
+							glVertex3f(blur[j + 1].x[i] / (pointcount * 10), float(blur[j + 1].y[i] / 40000 + ((j + 1) * 0.015)), float(graph[0].z - ((j + 1) * 0.1)));
+
+							glVertex3f(blur[j + 1].x[i + pointcount / connectioncount - 1] / (pointcount * 10), float(blur[j + 1].y[i + pointcount / connectioncount - 1] / 40000 + ((j + 1) * 0.015)), float(graph[0].z - ((j + 1) * 0.1)));
+
+							glVertex3f(blur[j].x[i + pointcount / connectioncount - 1] / (pointcount * 10), float(blur[j].y[i + pointcount / connectioncount - 1] / 40000 + (j * 0.015)), float(graph[0].z - (j * 0.1)));
+
+							glVertex3f(blur[j].x[i] / (pointcount * 10), float(blur[j].y[i] / 40000 + (j * 0.015)), float(graph[0].z - (j * 0.1)));
+
+						}
+						else
+
+						{
+							glVertex3f(blur[j + 1].x[i] / (pointcount * 10), float(blur[j + 1].y[i] / 10000 + ((j + 1) * 0.015)), float(graph[0].z - ((j + 1) * 0.1)));
+
+							glVertex3f(blur[j + 1].x[i + pointcount / connectioncount - 1] / (pointcount * 10), float(blur[j + 1].y[i + pointcount / connectioncount - 1] / 10000 + ((j + 1) * 0.015)), float(graph[0].z - ((j + 1) * 0.1)));
+
+							glVertex3f(blur[j].x[i + pointcount / connectioncount - 1] / (pointcount * 10), float(blur[j].y[i + pointcount / connectioncount - 1] / 10000 + (j * 0.015)), float(graph[0].z - (j * 0.1)));
+
+							glVertex3f(blur[j].x[i] / (pointcount * 10), float(blur[j].y[i] / 10000 + (j * 0.015)), float(graph[0].z - (j * 0.1)));
+						}
+
+						glEnd();
+
+					}
+
+				}
+			}
+		}
+	}
+
+	if (!landscape)
+
+	{
+
+		//----------------- Zeichnen aller Elemente des Wurmlochs ------------------------
+
+		//glLineWidth(1.0f); 
+
+		for (i = 0; i < planetcount; i++)
+
+		{
+
+			r_ = float(point[i].r) / 255;
+			g_ = float(point[i].g) / 255;
+			b_ = float(point[i].b) / 255;
+
+			r2_ = float(point[i].r2) / 255;
+			g2_ = float(point[i].g2) / 255;
+			b2_ = float(point[i].b2) / 255;
+
+			glBegin(GL_LINES);
+			glColor3f(r_, g_, b_);
+			glVertex3f(point[i].x, point[i].y, graph[0].z);
+			glColor3f(r2_, g2_, b2_);
+			glVertex3f(point[i].x, point[i].y, -6.0f);
+			glEnd();
+
+			if (i < planetcount - 1)
+
+			{
+				glBegin(GL_LINES);
+
+				glColor3f(r_, g_, b_);
+				glVertex3f(point[i].x, point[i].y, graph[0].z);
+				glColor3f(r2_, g2_, b2_);
+				glVertex3f(point[i + 1].x, point[i + 1].y, graph[0].z);
+				glColor3f(r_, g_, b_);
+				glVertex3f(point[i].x, point[i].y, -6.0f);
+				glColor3f(r2_, g2_, b2_);
+				glVertex3f(point[i + 1].x, point[i + 1].y, -6.0f);
+				glEnd();
 			}
 
 			else
 
 			{
-
-
-				return false;											// exit and return false
-
+				glBegin(GL_LINES);
+				glColor3f(r_, g_, b_);
+				glVertex3f(point[planetcount - 1].x, point[planetcount - 1].y, graph[0].z);
+				glColor3f(r2_, g2_, b2_);
+				glVertex3f(point[0].x, point[0].y, graph[0].z);
+				glColor3f(r2_, g2_, b2_);
+				glVertex3f(point[planetcount - 1].x, point[planetcount - 1].y, -6.0f);
+				glColor3f(r2_, g2_, b2_);
+				glVertex3f(point[0].x, point[0].y, -6.0f);
+				glEnd();
 			}
+
+
+			if (graph[1].active)
+
+			{
+				glColor3f(float(worm[i].r) / 255, float(worm[i].g) / 255, float(worm[i].b) / 255);
+
+				if (i < planetcount - 1)
+
+				{
+
+					glBegin(GL_LINES);
+					glVertex3f(worm[i].x, worm[i].y, graph[1].z);
+					glVertex3f(worm[i + 1].x, worm[i + 1].y, graph[1].z);
+					glEnd();
+
+				}
+
+				else
+
+				{
+
+					glBegin(GL_LINES);
+					glVertex3f(worm[planetcount - 1].x, worm[planetcount - 1].y, graph[1].z);
+					glVertex3f(worm[0].x, worm[0].y, graph[1].z);
+					glEnd();
+
+				}
+			}
+		}
+
+	}
+
+	//----------------- Zeichnen der Sterne ------------------------
+
+	glPointSize(1.0f);
+	glColor3f(1.0f, 1.0f, 1.0f);
+
+	for (i = 0; i < starcount; i++)
+
+	{
+		glBegin(GL_POINTS);
+		glVertex3f(stars[i].x, stars[i].y, -1.0f - zmove);
+		glEnd();
+	}
+
+	if (!scientific)
+		glColor3f(1.0f, 1.0f, 1.0f);
+	else
+		glColor3f(100.0f / 255, 100.0f / 255, 100.0f / 255);
+
+	glTranslatef(0, 0, -12.0f);
+
+	//----------------- Zeichnen des Texteffekts ------------------------
+
+	if (texteffekt)
+
+	{
+		textz -= 0.2f;
+		glTranslatef(0, 0, 0);
+		glRotatef(textz, 1.0, 0, 0);
+		glPrint(textz, textstring);
+
+	}
+
+	if (textz < -50.0f)
+		texteffekt = false;
+
+	//----------------- Zeichnen des Nebels ------------------------
+
+	if (fog)
+
+	{
+
+		//	glClearColor(0.2f,0.2f,0.2f,1.0f);		// We'll Clear To The Color Of The Fog ( Modified )
+
+		glFogi(GL_FOG_MODE, GL_LINEAR);				// Fog Mode
+		glFogfv(GL_FOG_COLOR, fogColor);			// Set Fog Color
+		glFogf(GL_FOG_DENSITY, 0.35f);				// How Dense Will The Fog Be
+		glHint(GL_FOG_HINT, GL_DONT_CARE);			// Fog Hint Value
+		glFogf(GL_FOG_START, 1.0f);					// Fog Start Depth
+		glFogf(GL_FOG_END, 7.0f);					// Fog End Depth
+		glEnable(GL_FOG);							// Enables GL_FOG
+
+	}
+
+	return true;
+}
+
+//------------------------------------------------------------------------------
+
+//++++++++++++++++++
+//Rendering Function
+//++++++++++++++++++
+
+void renderscene(struct winampVisModule* this_mod)
+
+{
+	int i;
+
+	frameratio = 50 / float(framerate);
+
+	//Behandlung der Ticks (Einheit fьr die Geschwindigkeit einiger Elemente (Framerateunabhдngig)
+
+	floatticks++;
+
+	if (floatticks >= 10 * (float(framerate) / 50))
+	{
+		for (i = 0; i < halfblur; i++)
+
+		{
+			ticks[i]++;
+		}
+
+		floatticks = 0;
+	}
+
+	for (i = 0; i < halfblur; i++)
+
+	{
+		if (ticks[i] >= blurcount)
+			ticks[i] = 0;
+	}
+
+	for (i = 0; i < halfblur; i++)
+
+	{
+		renderblur(ticks[i]);
+	}
+
+	frames++;
+
+	//Verwaltung der Winamp Daten
+
+	hwndwinamp = FindWindow(L"Winamp v1.x", NULL);
+	int aktplspos = SendMessage(hwndwinamp, WM_USER, 0, 125);
+	int soundtl = SendMessage(hwndwinamp, WM_USER, aktplspos, 212);
+	sprintf(soundtitle, "%s", soundtl);
+
+	int songread = SendMessage(hwndwinamp, WM_USER, 0, 105);
+
+	if (songread > 100 && songread < 200 && !songdisplayed)
+	{
+		songdisplayed = true;
+		char temp[256];
+		sprintf(temp, soundtitle);
+		if (soundtitle != "")
+			TextEffekt(soundtitle);
+		else
+		{
+			strcpy(temp, "Sry, Function Not Available!");
+			TextEffekt(temp);
+		}
+	}
+
+	if (songread > 600)
+		songdisplayed = false;
+
+	/*	sprintf(title, "DarkVis OpenGL - BPM: %f", bpm);
+		SetWindowText(hwnd, (LPCTSTR)title); */
+
+		//----------------- Rendering der Peaks ------------------------
+
+	for (i = 0; i < peakcount; i++)
+
+	{
+		peaks[i].y -= fallspeed;
+	}
+
+	//----------------- Rendering des "weglaufenden" Graphen ------------------------
+
+	if (graph[1].z <= -6.0f)
+
+	{
+
+		for (int x = -(pointcount / 2); x < pointcount / 2; x++)
+		{
+			graph[1].x[x + pointcount / 2] = float(x);
+			graph[1].y[x + pointcount / 2] = graph[0].y[x + pointcount / 2];
+		}
+
+		graph[1].z = graph[0].z;
+
+
+		//----------------- Rendering des "weglaufenden" Kreises ------------------------
+
+		for (i = 0; i < planetcount; i++)
+		{
+			worm[i].z = graph[1].z;
+			worm[i].r = rand() % 255;
+			worm[i].g = rand() % 255;
+			worm[i].b = rand() % 255;
+		}
+
+		graph[1].r = rand() % 255;
+		graph[1].g = rand() % 255;
+		graph[1].b = rand() % 255;
+	}
+
+	if (graph[1].active)
+
+	{
+		graph[1].z -= 0.15f / frameratio;
+
+		for (x = -(pointcount / 2); x < pointcount / 2; x++)
+		{
+			//graph[1].x[x + pointcount / 2] -= 2.0f * pointcount * 10;
+			graph[1].y[x + pointcount / 2] -= (0.02f * pointcount * 10) / frameratio;
+		}
+
+
+		for (int i = 0; i < planetcount; i++)
+		{
+
+			worm[i].z = graph[1].z;
 
 		}
 	}
 
+	//----------------- Rendering des aktuellen Graphen ------------------------
 
-	if (fullscreen)														// are we still in fullscreen mode?
+	for (x = -(pointcount / 2); x < pointcount / 2; x++)
+	{
+		graph[0].x[x + pointcount / 2] = float(x);
+		if (spectrum)
+			graph[0].y[x + pointcount / 2] = float(this_mod->spectrumData[1][int((x + pointcount / 2) * (576 / pointcount))]);
+		else
+			graph[0].y[x + pointcount / 2] = float(this_mod->waveformData[1][int(x * (576 / pointcount))]);
+	}
+
+	if (!landscape)
 
 	{
 
-		dwexstyle = WS_EX_APPWINDOW;										// window extended style
-		dwstyle = WS_POPUP;												// windows style
-		ShowCursor(false);												// hide mouse pointer
+		if (graph[0].z <= -0.2)
+			zadd = 0.001f;
+
+		if (graph[0].z >= -0.1)
+			zadd = -0.001f;
+
+		graph[0].z += zadd / frameratio;
+
+	}
+
+	if (!randomc)
+
+	{
+
+		if (graph[0].r >= 254 || graph[0].g >= 254 || graph[0].b >= 254)
+			cadd = -1;
+
+		if (graph[0].r <= 10 || graph[0].g <= 10 || graph[0].b <= 10)
+			cadd = 1;
+
+		graph[0].r += cadd;
+		graph[0].g += cadd;
+		graph[0].b += cadd;
+
 	}
 
 	else
+
 	{
-		dwexstyle = WS_EX_APPWINDOW | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE;					// window extended style
-		dwstyle = /*WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;*/WS_OVERLAPPEDWINDOW;									// windows style
+
+		graph[0].r = rand() % 255;
+		graph[0].g = rand() % 255;
+		graph[0].b = rand() % 255;
+
 	}
 
-    // Преобразуем char* title в wchar_t* для CreateWindowEx
-    wchar_t w_title[256];
-    MultiByteToWideChar(CP_ACP, 0, title, -1, w_title, 256);
+	//----------------- Rendering der drehenden Linien (Wurmloch) ------------------------
 
-	if (!(hwnd = CreateWindowEx(dwexstyle,					// extended style for the window
-		L"OpenGL",								// class name
-		w_title,								// window title (исправлено)
-		WS_CLIPSIBLINGS |						// required window style
-		WS_CLIPCHILDREN |						// required window style
-		dwstyle,								// selected window style
-		0, 0,									// window position
-		width, height,							// selected width and height
-		this_mod->hwndParent,					// no parent window
-		NULL,									// no menu
-		this_mod->hDllInstance,					//hinstance,								// instance
-		NULL)))									// don't pass anything to wm_create
-
-
+	for (int i = 0; i < planetcount; i++)
 	{
-		killglwindow();													// reset the display
-		MessageBox(NULL, L"window creation error.", L"error", MB_OK | MB_ICONEXCLAMATION);
-		return false;													// return false
+
+		if (point[i].angle >= 360)
+			point[i].angle = 0.0f;
+
+		if (worm[i].angle >= 360)
+			worm[i].angle = 0.0f;
+
+
+		point[i].angle += 0.25f / frameratio;
+
+		if (zturnadd == -0.5f)
+			point[i].angle += 0.75f / frameratio;
+
+
+		worm[i].angle += 0.25f / frameratio;
+
+		if (zturnadd == -0.5f)
+			worm[i].angle += 0.75f / frameratio;
+
+
+		point[i].x = float(point[i].radius * cos(point[i].angle * 0.017453));
+		point[i].y = float(point[i].radius * sin(point[i].angle * 0.017453));
+
+		worm[i].x = float(worm[i].radius * cos(worm[i].angle * 0.017453));
+		worm[i].y = float(worm[i].radius * sin(worm[i].angle * 0.017453));
+
 	}
 
+	//----------------- Turn-Rendering (Schaukeleffekt) ------------------------
 
-	static        PIXELFORMATDESCRIPTOR pfd =							// pfd tells windows how we want things to be
+	if (zturn >= 50)
+		zturnadd = -0.5f;
 
-	{
-		sizeof(PIXELFORMATDESCRIPTOR),									// size of this pixel format descriptor
-			1,															// version number
-			PFD_DRAW_TO_WINDOW |                                        // FORMAT MUST SUPPORT WINDOW
-			PFD_SUPPORT_OPENGL |                                        // FORMAT MUST SUPPORT OPENGL
-			PFD_DOUBLEBUFFER,											// MUST SUPPORT DOUBLE BUFFERING
-			PFD_TYPE_RGBA,												// request an rgba format
-			static_cast<BYTE>(bits),														// select our color depth
-			0, 0, 0, 0, 0, 0,											// color bits ignored
-			0,															// no alpha buffer
-			0,															// shift bit ignored
-			0,															// no accumulation buffer
-			0, 0, 0, 0,													// accumulation bits ignored
-			16,															// 16bit z-buffer (depth buffer)
-			0,															// no stencil buffer
-			0,															// no auxiliary buffer
-			PFD_MAIN_PLANE,                                                // main drawing layer
-			0,															// reserved
-			0, 0, 0														// layer masks ignored
-	};
-	if (!(hDC = GetDC(hwnd)))												// did we get a device context?
+	if (zturn <= -50)
+		zturnadd = 0.5f;
 
-	{
-		killglwindow();													// reset the display
-		MessageBox(NULL, L"can't create a gl device context.", L"error", MB_OK | MB_ICONEXCLAMATION);
-		return false;													// return false
-	}
-
-
-	if (!(pixelformat = ChoosePixelFormat(hDC, &pfd)))						// did windows find a matching pixel format?
-
-	{
-		killglwindow();													// reset the display
-		MessageBox(NULL, L"can't find a suitable pixelformat.", L"error", MB_OK | MB_ICONEXCLAMATION);
-		return false;													// return false
-	}
-
-	if (!SetPixelFormat(hDC, pixelformat, &pfd))							// are we able to set the pixel format?
-
-	{
-		killglwindow();													// reset the display
-		MessageBox(NULL, L"can't set the pixelformat.", L"error", MB_OK | MB_ICONEXCLAMATION);
-		return false;													// return false
-	}
-
-	if (!(hRC = wglCreateContext(hDC)))									// are we able to get a rendering context?
-
-	{
-		killglwindow();													// reset the display
-		MessageBox(NULL, L"can't create a gl rendering context.", L"error", MB_OK | MB_ICONEXCLAMATION);
-		return false;													// return false
-	}
-
-	if (!wglMakeCurrent(hDC, hRC))										// try to activate the rendering context
-
-	{
-		killglwindow();													// reset the display
-		MessageBox(NULL, L"can't activate the gl rendering context.", L"error", MB_OK | MB_ICONEXCLAMATION);
-		return false;													// return false
-	}
-
-	ShowWindow(hwnd, SW_SHOW);											// show the window
-	SetForegroundWindow(hwnd);											// slightly higher priority
-	SetFocus(hwnd);														// sets keyboard focus to the window
-	resizeglscene(width, height);										// set up our perspective gl screen
-
-	if (!initgl())														// initialize our newly created gl window
-
-	{
-		killglwindow();                                                // reset the display
-		MessageBox(NULL, L"initialization failed.", L"error", MB_OK | MB_ICONEXCLAMATION);
-		return false;													// return false
-	}
-
-	return true;														// success
-
+	zturn += zturnadd / frameratio;
 }
 
 //------------------------------------------------------------------------------
 
-GLvoid BuildFont(GLvoid)								// Build Our Bitmap Font
+//++++++++++++++++++++++++
+//Funktion fьr jeden Frame
+//++++++++++++++++++++++++
+
+int render(struct winampVisModule* this_mod)
 {
-	HFONT	font;										// Windows Font ID
+	//----------------- Beats berechnen ------------------------
 
-	base = glGenLists(256);								// Storage For 256 Characters
-
-	font = CreateFont(8,								// Height Of Font
-		8,						// Width Of Font
-		0,								// Angle Of Escapement
-		0,								// Orientation Angle
-		100,						// Font Weight
-		FALSE,							// Italic
-		FALSE,							// Underline
-		FALSE,							// Strikeout
-		ANSI_CHARSET,					// Character Set Identifier
-		OUT_TT_PRECIS,					// Output Precision
-		CLIP_DEFAULT_PRECIS,			// Clipping Precision
-		ANTIALIASED_QUALITY,			// Output Quality
-		FF_DONTCARE | DEFAULT_PITCH,		// Family And Pitch
-		L"Verdana");						// Font Name
-
-	SelectObject(hDC, font);							// Selects The Font We Created
-
-	wglUseFontOutlines(hDC,							// Select The Current DC
-		0,								// Starting Character
-		255,							// Number Of Display Lists To Build
-		base,							// Starting Display Lists
-		0.0f,							// Deviation From The True Outlines
-		0.001f,							// Font Thickness In The Z Direction
-		WGL_FONT_LINES,				// Use Polygons, Not Lines
-		gmf);							// Address Of Buffer To Recieve Data
-
-}
-
-//------------------------------------------------------------------------------
-
-GLvoid KillFont(GLvoid)									// Delete The Font
-{
-	glDeleteLists(base, 96);							// Delete All 96 Characters
-}
-
-//------------------------------------------------------------------------------
-
-GLvoid glPrint(float zpos, const char* fmt, ...)					// Custom GL "Print" Routine
-{
-	float		length = 0;								// Used To Find The Length Of The Text
-	char		text[256];								// Holds Our String
-	va_list		ap;										// Pointer To List Of Arguments
-
-	if (fmt == NULL)									// If There's No Text
-		return;											// Do Nothing
-
-	va_start(ap, fmt);									// Parses The String For Variables
-	vsprintf(text, fmt, ap);						// And Converts Symbols To Actual Numbers
-	va_end(ap);											// Results Are Stored In Text
-
-	for (unsigned int loop = 0; loop < (strlen(text)); loop++)	// Loop To Find Text Length
+	if (beatdetection)
 	{
-		length += gmf[text[loop]].gmfCellIncX;			// Increase Length By Each Characters Width
+		tmp_ticks++;
+		getbeat();
 	}
 
-	glTranslatef(-length / 2, 0, zpos);					// Center Our Text On The Screen
+	//----------------- Alles Zeichnen ------------------------
 
-	glPushAttrib(GL_LIST_BIT);							// Pushes The Display List Bits
-	glListBase(base);									// Sets The Base Character to 0
-	glCallLists(strlen(text), GL_UNSIGNED_BYTE, text);	// Draws The Display List Text
-	glPopAttrib();										// Pops The Display List Bits
+	renderscene(this_mod);		//Rendert die Scene
+	SwapBuffers(hDC);			//Buffer Austausch
+	drawglscene();				//Stellt die Scene da
+
+	return 0;
 }
 
 //------------------------------------------------------------------------------
 
+//++++++++++++++++++++++
 //Winamp Init Funktionen
+//++++++++++++++++++++++
 
-//------------------------------------------------------------------------------
+// module header, includes version, description, and address of the module retriever function
+winampVisHeader hdr = { VIS_HDRVER, (char*)"DarkVis OpenGL for Winamp Beta 1.5", getModule };
 
-//Winamp Vis Modul
-
-char mod1_description[] = "DarkVis OpenGL Beta 1.5";
-
-winampVisModule mod1 =
-{
-	mod1_description,
-	NULL,	// hwndparent
-	NULL,	// hdllinstance
-	0,		// srate
-	2,		// nch
-	0,		// latencyms
-	framerate,		// delayms
-	2,		// spectrumnch
-	2,		// waveformnch
-	{ 0, },	// spectrumdata
-	{ 0, },	// waveformdata
-	config,
-	init,
-	render,
-	quit
-};
-
-// getmodule routine from the main header. returns null if an invalid module was requested,
-// otherwise returns either mod1, mod2 or mod3 depending on 'which'.
-winampVisModule* getModule(int which)
-{
-	switch (which)
-	{
-	case 0:		return &mod1;
-	default:	return NULL;
-	}
-}
-
-// configuration. passed this_mod, as a "this" parameter. allows you to make one configuration
-// function that shares code for all your modules (you don't have to use it though, you can make
-// config1(), config2(), etc...)
-//void config(struct winampVisModule* this_mod)
-//{
-//	MessageBox(this_mod->hwndParent, L"DarkVis OpenGL Beta 1.5 for Winamp\n"
-//		"Copyright (C) 2001 by DarKnight (darknight@deltaeagle.net)\n\n"
-//		"Diese Winamp-Erweiterung nutzt OpenGL. Alle OpenGL-Initialisierungsfunktionen sind von Jeff Molofee (NeHe) erstellt. Danke daran!\n\n"
-//		"Wie man die Einstellungen ändert:\n\n"
-//
-//		//"H: Show this info during running the plugin\n"
-//
-//		"Nach Oben / Unten: Bewege dich in den Bildschirm hinein und hinaus\n"
-//		"Links / Rechts: Erhöhe oder verringere die Hintergrundgeschwindigkeit\n"
-//		"Leertaste: Setze die Hintergrundgeschwindigkeit auf Standard zurück\n"
-//		"Numpad 4: Titel Zurück\n"
-//		"Numpad 6: Titel Vor\n"
-//		"A: Aktiviere / Deaktiviere Anti-Aliasing\n"
-//		"N: Aktiviere / Deaktiviere Peaks\n"
-//		"Numpad 2 / Numpad 8: Erhöhe / Verringere die Fallgeschwindigkeit der Peaks\n"
-//		"B: Modus wechseln\n"
-//		"Y: Spektraldaten-Graph (Standard) / Wellenform-Graph\n"
-//		"X: Zeige Linien zwischen den Graphen / Deaktiviere Linien zwischen den Graphen\n"
-//		"Bild Hoch / Runter: Erhöhe / Verringere die Anzahl dieser Linien\n"
-//		"C: Standard Graphfarbe / Zufällige Graphfarbe\n"
-//		"V: Ändere die Farben des 'Wurmlochs'\n"
-//		"T: Zeige den Namen des gespielten Titels an \n\n"
-//		"Viel Spaß mit Ihrer Musik!\n\n"
-//		"Die neueste Version finden Sie unter http://sourceforge.net/projects/darkvis/", L"Info", MB_OK);
-//}
-
-//------------------------------------------------------------------------------
-
-//Winamp Config Funktionen
-
-//------------------------------------------------------------------------------
-
-void config_getinifn(struct winampVisModule* this_mod, char* ini_file)
-{	// makes a .ini file in the winamp directory named "DarkVis.ini"
-	char* p;
-#ifdef UNICODE
-	wchar_t temp[MAX_PATH];
-	GetModuleFileName(this_mod->hDllInstance, temp, MAX_PATH);
-	// Преобразуем wchar_t* в char*
-	size_t converted = 0;
-	wcstombs_s(&converted, ini_file, MAX_PATH, temp, _TRUNCATE);
-#else
-	GetModuleFileName(this_mod->hDllInstance, ini_file, MAX_PATH);
+// this is the only exported symbol. returns our main header.
+// if you are compiling c++, the extern "c" { is necessary, so we just #ifdef it
+#ifdef __cplusplus
+extern "C" {
 #endif
-	p = ini_file + strlen(ini_file);
-	while (p >= ini_file && *p != '\\') p--;
-	if (++p >= ini_file) *p = 0;
-	strcat(ini_file, "DarkVis.ini");
-}
-
-
-// Безопасный конвертер char* → wchar_t*
-// outBuffer — твой буфер, outSize — его размер В ШИРОКИХ СИМВОЛАХ (не байтах)
-void CharToWide(const char* src, wchar_t* dest, size_t destSize) {
-	if (!src || !dest || destSize == 0) return;
-	MultiByteToWideChar(CP_ACP, 0, src, -1, dest, static_cast<int>(destSize));
-}
-void config_read(struct winampVisModule* this_mod)
-{
-	char ini_file[MAX_PATH];
-	wchar_t w_ini_file[MAX_PATH];
-	wchar_t w_section[256];
-
-	config_getinifn(this_mod, ini_file);
-
-	// Преобразуем ini_file и this_mod->description в wchar_t*
-	CharToWide(ini_file, w_ini_file, MAX_PATH);
-	CharToWide(this_mod->description, w_section, 256);
-
-	config_x = GetPrivateProfileIntW(w_section, L"Screen_x", config_x, w_ini_file);
-	config_y = GetPrivateProfileIntW(w_section, L"Screen_y", config_y, w_ini_file);
-
-	int i_fog = GetPrivateProfileIntW(w_section, L"Fog", 0, w_ini_file);
-	fog = (i_fog == 1);
-
-	int i_randomc = GetPrivateProfileIntW(w_section, L"Randomcolors", 1, w_ini_file);
-	randomc = (i_randomc == 1);
-
-	int i_spectrum = GetPrivateProfileIntW(w_section, L"Spectrumgraph", 1, w_ini_file);
-	spectrum = (i_spectrum == 1);
-
-	int i_connections = GetPrivateProfileIntW(w_section, L"Connections", 1, w_ini_file);
-	connections = (i_connections == 1);
-
-	int i_solid = GetPrivateProfileIntW(w_section, L"Solidrendering", 0, w_ini_file);
-	solid = (i_solid == 1);
-
-	int i_landscape = GetPrivateProfileIntW(w_section, L"Landscape", 0, w_ini_file);
-	if (i_landscape == 1)
+	__declspec(dllexport) winampVisHeader* winampVisGetHeader()
 	{
-		landscape = true;
-		setlandscape(1);
+		return &hdr;
+	}
+#ifdef __cplusplus
+}
+#endif
+
+// initialization. registers our window class, creates our window, etc. again, this one works for
+// both modules, but you could make init1() and init2()...
+// returns 0 on success, 1 on failure.
+int init(struct winampVisModule* this_mod)
+{
+	SetWindowLong(hwnd, GWL_USERDATA, (long)this_mod); // set our user data to a "this" pointer
+
+	if (MessageBox(NULL, L"Fullscreen (1024 x 768)?", L"DarkVis OpenGL Fullscreen", MB_YESNO | MB_ICONQUESTION) == IDNO)
+	{
+		fullscreen = false;												// windowed mode
+
+		if (!createglwindow((char*)"DarkVis OpenGL for Winamp Beta 1.5 - by DarKnight (C) 2001", 800, 600, 16, fullscreen, this_mod))
+		{
+			return 0;														// quit if window was not created
+		}
+	}
+
+	else
+
+	{
+		if (!createglwindow((char*)"DarkVis OpenGL for Winamp Beta 1.5 - by DarKnight (C) 2001", 1024, 768, 16, fullscreen, this_mod))
+		{
+			return 0;														// quit if window was not created
+		}
+	}
+
+	srand((unsigned)time(NULL));
+
+	//Komplette Grafik Initierung
+
+	BuildFont();				//Anlegen der Schrift
+
+	r = rand() % 250;		//Farben des Wurmlochs
+	g = rand() % 250;
+	b = rand() % 250;
+
+	r2 = rand() % 250;
+	g2 = rand() % 250;
+	b2 = rand() % 250;
+
+	graph[0].z = -0.15f;		//Setze den ersten Graphen
+	zadd = -0.001f;				//Geschwindigkeit mit der sich die Scene verschiebt
+
+	for (int i = 1; i < blurcount; i++)	//Blur-Graphen Farben einrichten
+
+	{
+		blur[i].r = int(255 - i * (255 / blurcount));
+		blur[i].g = int(255 - i * (255 / blurcount));
+		blur[i].b = int(255 - i * (255 / blurcount));
+	}
+
+	graph[1].r = 60;			//Farben fьr den zweiten Graphen
+	graph[1].g = 40;
+	graph[1].b = 240;
+
+	graph[0].active = true;		//Beide Graphen aktiven 
+	graph[1].active = true;
+
+	int i;
+	for (i = 0; i < starcount; i++)	//Die Positionen der Sterne einrichten (Zufall)
+
+	{
+		stars[i].x = float(rand() % 300) / 100 - 1.5f;
+		stars[i].y = float(rand() % 150) / 100 - 0.75f;
+	}
+
+	for (i = 0; i < halfblur; i++)
+
+	{
+		ticks[i] = i * 3;
+	}
+
+	config_read(this_mod);
+
+	for (i = 0; i < planetcount; i++)	//Richte das Wurmloch ein
+
+	{
+		tmpradius = rand() % 11;
+		tmpangle = (360 / planetcount) * i;
+		tmpspeed = rand() % 21;
+
+		point[i].radius = 0.1f;				//float(tmpradius) / 10;
+		point[i].angle = float(tmpangle);
+		point[i].speed = 0.5f;				//float(tmpspeed) / 10;
+
+		point[i].r = r;
+		point[i].g = g;
+		point[i].b = b;
+
+		point[i].r2 = r2;
+		point[i].g2 = g2;
+		point[i].b2 = b2;
+
+		worm[i].radius = 0.1f;				//float(tmpradius) / 10;
+		worm[i].angle = float(tmpangle);
+		worm[i].speed = 0.5f;				//float(tmpspeed) / 10;
+
+		worm[i].r = 60;
+		worm[i].g = 40;
+		worm[i].b = 240;
+
+		if (point[i].radius == 0.00f)
+			point[i].radius = 0.1f;
+
+
+		if (point[i].speed == 0.00f)
+			point[i].speed = 0.5f;
+	}
+
+	return 0;
+}
+
+// cleanup (opposite of init()). Destroys the window, unregisters the window class
+void quit(struct winampVisModule* this_mod)
+{
+	KillFont();		//Schriftart auflцsen
+
+	//Speicherreservierung der Arrays freigeben
+
+	delete[] blur;
+	delete[] point;
+	delete[] worm;
+	delete[] stars;
+	delete[] peaks;
+
+	config_write(this_mod);		// write configuration
+
+	killglwindow();														//Fenster auflцsen														// Kill The Window
+	UnregisterClass(L"OpenGL", this_mod->hDllInstance);					// unregister window class
+}
+
+/*
+=============================
+WndProc Nachrichtenbehandlung
+=============================
+*/
+
+LRESULT CALLBACK WndProc(HWND        hWnd,								// Handle For This Window
+	UINT        uMsg,								// Message For This Window
+	WPARAM        wParam,							// Additional Message Information
+	LPARAM        lParam)							// Additional Message Information
+{
+	switch (uMsg)														// Check For Windows Messages
+
+	{
+
+	case WM_DESTROY: PostQuitMessage(0); return 0;
+	case WM_CREATE:		return 0;
+
+	case WM_ACTIVATE:													// Watch For Window Activate Message
+	{
+		if (!HIWORD(wParam))										// Check Minimization State
+		{
+			active = TRUE;											// Program Is Active
+		}
+		else
+		{
+			active = FALSE;											// Program Is No Longer Active
+		}
+
+		return 0;													// Return To The Message Loop
+	}
+
+	case WM_SYSCOMMAND:													// Intercept System Commands
+	{
+		switch (wParam)												// Check System Calls
+		{
+		case SC_SCREENSAVE:											// Screensaver Trying To Start?
+		case SC_MONITORPOWER:										// Monitor Trying To Enter Powersave?
+			return 0;												// Prevent From Happening
+		}
+		break;														// Exit
+	}
+
+	//Behandlung der Key Messages
+
+	case WM_KEYDOWN:													// Is A Key Being Held Down?
+	{
+
+		keys[wParam] = TRUE;
+
+
+		if (keys[VK_ESCAPE])
+
+		{
+			PostQuitMessage(0);
+		}
+
+		if (keys[VK_UP] && zmove <= 3.0f)
+
+		{
+			if (!landscape || scientific)
+				zmove += 0.02f;
+		}
+
+		if (keys[VK_DOWN] && zmove >= -0.3f)
+
+		{
+			if (!landscape || scientific)
+				zmove -= 0.02f;
+		}
+
+		if (keys[VK_LEFT] && framerate >= 1)
+
+		{
+			framerate--;
+		}
+
+		if (keys[VK_RIGHT])
+
+		{
+			framerate++;
+		}
+
+		if (keys[VK_SPACE])
+
+		{
+			framerate = 10;
+			for (int i = 0; i < planetcount; i++)	//Richte das Wurmloch ein
+
+			{
+				tmpradius = rand() % 11;
+				tmpangle = (360 / planetcount) * i;
+				tmpspeed = rand() % 21;
+
+				point[i].radius = 0.1f;				//float(tmpradius) / 10;
+				point[i].angle = float(tmpangle);
+				point[i].speed = 0.5f;				//float(tmpspeed) / 10;
+
+				worm[i].radius = 0.1f;				//float(tmpradius) / 10;
+				worm[i].angle = float(tmpangle);
+				worm[i].speed = 0.5f;				//float(tmpspeed) / 10;
+			}
+
+			TextEffekt((char*)"Background Moverate Reset");
+		}
+
+		if (keys['A'])
+
+		{
+			if (!anti)
+			{
+				anti = true;
+				TextEffekt((char*)"Anti Aliasing Enabled");
+			}
+
+			else
+			{
+				anti = false;
+				glDisable(GL_LINE_SMOOTH);
+				TextEffekt((char*)"Anti Aliasing Disabled");
+			}
+		}
+
+		if (keys['B'])
+
+		{
+			modeset++;
+
+			if (modeset == 3)
+				modeset = 0;
+
+			if (modeset == 0)
+				setlandscape(1);
+
+			if (modeset == 1)
+			{
+				setlandscape(0);
+				setscientific(1);
+			}
+
+			if (modeset == 2)
+			{
+				setscientific(0);
+				setdefault(1);
+			}
+
+		}
+
+		if (keys[VK_NEXT] && connectioncount > 5)
+
+		{
+			connectioncount--;
+		}
+
+		if (keys[VK_PRIOR] && connectioncount < 30)
+
+		{
+			connectioncount++;
+		}
+
+		if (keys['N'])
+
+		{
+			if (actpeaks)
+			{
+				actpeaks = false;
+				TextEffekt((char*)"Peaks Disabled");
+			}
+			else
+			{
+				actpeaks = true;
+				TextEffekt((char*)"Peaks Enabled");
+			}
+		}
+
+		if (keys['X'])
+
+		{
+			if (!connections)
+			{
+				connections = true;
+				TextEffekt((char*)"Enabled Connections");
+			}
+			else
+			{
+				connections = false;
+				TextEffekt((char*)"Disabled Connections");
+			}
+		}
+
+		if (keys['Y'])
+
+		{
+			if (!spectrum)
+			{
+				spectrum = true;
+				actpeaks = true;
+				TextEffekt((char*)"Toggled Spectrumdata Graph");
+			}
+			else
+			{
+				spectrum = false;
+				actpeaks = false;
+				TextEffekt((char*)"Toggled Wavedata Graph");
+			}
+		}
+
+
+		if (keys['C'])
+
+		{
+			if (!randomc)
+			{
+				randomc = true;
+				TextEffekt((char*)"Toggled Random Graph Color");
+			}
+			else
+			{
+				randomc = false;
+				graph[0].r = 100;
+				graph[0].g = 100;
+				graph[0].b = 100;
+
+				for (int i = 1; i < blurcount; i++)
+
+				{
+
+					blur[i].r = int(255 - i * (255 / blurcount));
+					blur[i].g = int(255 - i * (255 / blurcount));
+					blur[i].b = int(255 - i * (255 / blurcount));
+
+				}
+
+				TextEffekt((char*)"Toggled Default Graph Color");
+			}
+		}
+
+		if (keys['T'])
+
+		{
+			char temp[256];
+			sprintf(temp, soundtitle);
+			if (soundtitle != "")
+				TextEffekt(soundtitle);
+
+			else
+			{
+				strcpy(temp, "Sry, Function Not Available!");
+				TextEffekt(temp);
+			}
+
+		}
+
+		if (keys[VK_NUMPAD4])
+		{
+			TextEffekt((char*)"Previous Track");
+			SendMessage(hwndwinamp, WM_COMMAND, 40044, 0);
+		}
+		if (keys[VK_NUMPAD6])
+		{
+			TextEffekt((char*)"Next Track");
+			SendMessage(hwndwinamp, WM_COMMAND, 40048, 0);
+		}
+		if (keys[VK_NUMPAD2])
+		{
+			if (fallspeed >= 0)
+				fallspeed -= 0.00005f;
+		}
+
+		if (keys[VK_NUMPAD8])
+			fallspeed += 0.00005f;
+
+		if (keys['V'])
+
+		{
+			r = rand() % 250;
+			g = rand() % 250;
+			b = rand() % 250;
+			r2 = rand() % 250;
+			g2 = rand() % 250;
+			b2 = rand() % 250;
+
+			for (int i = 0; i < planetcount; i++)
+
+			{
+
+				point[i].r = r;
+				point[i].g = g;
+				point[i].b = b;
+
+				point[i].r2 = r2;
+				point[i].g2 = g2;
+				point[i].b2 = b2;
+
+			}
+
+			TextEffekt((char*)"Changed Wormhole Colors");
+		}
+
+		/*if(keys['N'])
+
+{
+	if(!solid)
+	{
+		solid = true;
+		TextEffekt("Enabled Solid Rendering");
 	}
 	else
-		landscape = false;
-
-	int i_scientific = GetPrivateProfileIntW(w_section, L"Scientific", 1, w_ini_file);
-	if (i_scientific == 1)
 	{
-		setscientific(1);
-		scientific = true;
+		solid = false;
+		TextEffekt("Disabled Solid Rendering");
 	}
-	else
-		scientific = false;
-
-	int i_anti = GetPrivateProfileIntW(w_section, L"Antialiasing", 0, w_ini_file);
-	anti = (i_anti == 1);
-
-	int i_peaks = GetPrivateProfileIntW(w_section, L"Peaks", 1, w_ini_file);
-	actpeaks = (i_peaks == 1);
-
-	r = GetPrivateProfileIntW(w_section, L"R", r, w_ini_file);
-	g = GetPrivateProfileIntW(w_section, L"G", g, w_ini_file);
-	b = GetPrivateProfileIntW(w_section, L"B", b, w_ini_file);
-
-	r2 = GetPrivateProfileIntW(w_section, L"R2", r2, w_ini_file);
-	g2 = GetPrivateProfileIntW(w_section, L"G2", g2, w_ini_file);
-	b2 = GetPrivateProfileIntW(w_section, L"B2", b2, w_ini_file);
 }
 
-//Schreiben der Einstellungen
 
-void config_write(struct winampVisModule* this_mod)
+if(keys['M'])
 {
-    char string[32];
-    char ini_file[MAX_PATH];
+	Beat();
+}
+*/
 
-    config_getinifn(this_mod, ini_file);
+		return 0;													// Jump Back 
+	}
 
-    // Используем sprintf вместо wsprintf для char*
-    sprintf(string, "%d", config_x);
-    WritePrivateProfileStringA(this_mod->description, "Screen_x", string, ini_file);
-    sprintf(string, "%d", config_y);
-    WritePrivateProfileStringA(this_mod->description, "Screen_y", string, ini_file);
+	case WM_KEYUP:														// Has A Key Been Released?
+	{
+		keys[wParam] = FALSE;										// If So, Mark It As FALSE
+		return 0;													// Jump Back
+	}
 
-    //---------
+	case WM_SIZE:														// Resize The OpenGL Window
+	{
+		resizeglscene(LOWORD(lParam), HIWORD(lParam));				// LoWord=Width, HiWord=Height
+		drawglscene();
+		return 0;													// Jump Back
+	}
+	}
 
-    sprintf(string, "%d", fog ? 1 : 0);
-    WritePrivateProfileStringA(this_mod->description, "Fog", string, ini_file);
-
-    sprintf(string, "%d", randomc ? 1 : 0);
-    WritePrivateProfileStringA(this_mod->description, "Randomcolors", string, ini_file);
-
-    sprintf(string, "%d", spectrum ? 1 : 0);
-    WritePrivateProfileStringA(this_mod->description, "Spectrumgraph", string, ini_file);
-
-    sprintf(string, "%d", connections ? 1 : 0);
-    WritePrivateProfileStringA(this_mod->description, "Connections", string, ini_file);
-
-    sprintf(string, "%d", solid ? 1 : 0);
-    WritePrivateProfileStringA(this_mod->description, "Solidrendering", string, ini_file);
-
-    sprintf(string, "%d", landscape ? 1 : 0);
-    WritePrivateProfileStringA(this_mod->description, "Landscape", string, ini_file);
-
-    sprintf(string, "%d", scientific ? 1 : 0);
-    WritePrivateProfileStringA(this_mod->description, "Scientific", string, ini_file);
-
-    sprintf(string, "%d", anti ? 1 : 0);
-    WritePrivateProfileStringA(this_mod->description, "Antialiasing", string, ini_file);
-
-    sprintf(string, "%d", actpeaks ? 1 : 0);
-    WritePrivateProfileStringA(this_mod->description, "Peaks", string, ini_file);
-
-    sprintf(string, "%d", r);
-    WritePrivateProfileStringA(this_mod->description, "R", string, ini_file);
-    sprintf(string, "%d", g);
-    WritePrivateProfileStringA(this_mod->description, "G", string, ini_file);
-    sprintf(string, "%d", b);
-    WritePrivateProfileStringA(this_mod->description, "B", string, ini_file);
-
-    sprintf(string, "%d", r2);
-    WritePrivateProfileStringA(this_mod->description, "R2", string, ini_file);
-    sprintf(string, "%d", g2);
-    WritePrivateProfileStringA(this_mod->description, "G2", string, ini_file);
-    sprintf(string, "%d", b2);
-    WritePrivateProfileStringA(this_mod->description, "B2", string, ini_file);
+	// Pass All Unhandled Messages To DefWindowProc
+	return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
-//Вспомогательная функция для преобразования строки
-//Рисунок 14 из 14
-
-void CharToWChar(const char* src, wchar_t* dst, int dstSize)
-{
-    MultiByteToWideChar(CP_ACP, 0, src, -1, dst, dstSize);
-}
-
-//Ende von init.cpp =)
+//Ende von main.cpp =)
