@@ -1129,7 +1129,7 @@ LRESULT CALLBACK WndProc(HWND        hWnd,								// Handle For This Window
 				worm[i].speed = 0.5f;				//float(tmpspeed) / 10;
 			}
 
-			TextEffekt("Background Moverate Reset");
+			TextEffekt((char*)"Background Moverate Reset");
 		}
 
 		if (keys['A'])
@@ -1138,14 +1138,14 @@ LRESULT CALLBACK WndProc(HWND        hWnd,								// Handle For This Window
 			if (!anti)
 			{
 				anti = true;
-				TextEffekt("Anti Aliasing Enabled");
+				TextEffekt((char*)"Anti Aliasing Enabled");
 			}
 
 			else
 			{
 				anti = false;
 				glDisable(GL_LINE_SMOOTH);
-				TextEffekt("Anti Aliasing Disabled");
+				TextEffekt((char*)"Anti Aliasing Disabled");
 			}
 		}
 
@@ -1192,12 +1192,12 @@ LRESULT CALLBACK WndProc(HWND        hWnd,								// Handle For This Window
 			if (actpeaks)
 			{
 				actpeaks = false;
-				TextEffekt("Peaks Disabled");
+				TextEffekt((char*)"Peaks Disabled");
 			}
 			else
 			{
 				actpeaks = true;
-				TextEffekt("Peaks Enabled");
+				TextEffekt((char*)"Peaks Enabled");
 			}
 		}
 
@@ -1207,12 +1207,12 @@ LRESULT CALLBACK WndProc(HWND        hWnd,								// Handle For This Window
 			if (!connections)
 			{
 				connections = true;
-				TextEffekt("Enabled Connections");
+				TextEffekt((char*)"Enabled Connections");
 			}
 			else
 			{
 				connections = false;
-				TextEffekt("Disabled Connections");
+				TextEffekt((char*)"Disabled Connections");
 			}
 		}
 
@@ -1223,13 +1223,13 @@ LRESULT CALLBACK WndProc(HWND        hWnd,								// Handle For This Window
 			{
 				spectrum = true;
 				actpeaks = true;
-				TextEffekt("Toggled Spectrumdata Graph");
+				TextEffekt((char*)"Toggled Spectrumdata Graph");
 			}
 			else
 			{
 				spectrum = false;
 				actpeaks = false;
-				TextEffekt("Toggled Wavedata Graph");
+				TextEffekt((char*)"Toggled Wavedata Graph");
 			}
 		}
 
@@ -1240,7 +1240,7 @@ LRESULT CALLBACK WndProc(HWND        hWnd,								// Handle For This Window
 			if (!randomc)
 			{
 				randomc = true;
-				TextEffekt("Toggled Random Graph Color");
+				TextEffekt((char*)"Toggled Random Graph Color");
 			}
 			else
 			{
@@ -1259,7 +1259,7 @@ LRESULT CALLBACK WndProc(HWND        hWnd,								// Handle For This Window
 
 				}
 
-				TextEffekt("Toggled Default Graph Color");
+				TextEffekt((char*)"Toggled Default Graph Color");
 			}
 		}
 
@@ -1281,12 +1281,12 @@ LRESULT CALLBACK WndProc(HWND        hWnd,								// Handle For This Window
 
 		if (keys[VK_NUMPAD4])
 		{
-			TextEffekt("Previous Track");
+			TextEffekt((char*)"Previous Track");
 			SendMessage(hwndwinamp, WM_COMMAND, 40044, 0);
 		}
 		if (keys[VK_NUMPAD6])
 		{
-			TextEffekt("Next Track");
+			TextEffekt((char*)"Next Track");
 			SendMessage(hwndwinamp, WM_COMMAND, 40048, 0);
 		}
 		if (keys[VK_NUMPAD2])
@@ -1322,7 +1322,7 @@ LRESULT CALLBACK WndProc(HWND        hWnd,								// Handle For This Window
 
 			}
 
-			TextEffekt("Changed Wormhole Colors");
+			TextEffekt((char*)"Changed Wormhole Colors");
 		}
 
 		/*if(keys['N'])
