@@ -22,9 +22,69 @@ die etwas mit Initialisierung der Komponenten zu tun haben.
 */
 
 //------------------------------------------------------------------------------
-
+#define _CRT_SECURE_NO_WARNINGS
 #include "init.h"
+#include <windows.h>
+#include <GL/gl.h>
+#include <stdio.h>// или <stdio.h>
+#include <string.h>
 
+// Объявляем структуру сами — она жила в glaux.h и умерла вместе с ним
+struct AUX_RGBImageRec {
+	int sizeX;
+	int sizeY;
+	unsigned char* data;
+};
+// Простой загрузчик BMP для замены auxDIBImageLoad
+AUX_RGBImageRec* LoadBMP(const char* filename) {
+	FILE* file = fopen(filename, "rb");
+	if (!file) return nullptr;
+
+	BITMAPFILEHEADER fileHeader;
+	fread(&fileHeader, sizeof(BITMAPFILEHEADER), 1, file);
+
+	// Проверяем, что это BMP
+	if (fileHeader.bfType != 0x4D42) {
+		fclose(file);
+		return nullptr;
+	}
+
+	BITMAPINFOHEADER infoHeader;
+	fread(&infoHeader, sizeof(BITMAPINFOHEADER), 1, file);
+
+	// Ищем начало данных пикселей
+	fseek(file, fileHeader.bfOffBits, SEEK_SET);
+
+	int width = infoHeader.biWidth;
+	int height = infoHeader.biHeight;
+	int size = width * height * 3; // 24-бит
+
+	unsigned char* data = new unsigned char[size];
+	fread(data, sizeof(unsigned char), size, file);
+	fclose(file);
+
+	// BMP хранит BGR, переворачиваем в RGB
+	for (int i = 0; i < size; i += 3) {
+		unsigned char temp = data[i];
+		data[i] = data[i + 2];
+		data[i + 2] = temp;
+	}
+
+	// Создаем структуру, аналогичную возврату auxDIBImageLoad
+	AUX_RGBImageRec* image = new AUX_RGBImageRec;
+	image->sizeX = width;
+	image->sizeY = height;
+	image->data = data;
+	return image;
+}
+
+// Не забыть функцию очистки памяти, которую обычно вызывали после загрузки текстуры
+void FreeBMPImage(AUX_RGBImageRec* image) {
+	if (image) {
+		delete[] image->data;
+		delete image;
+	}
+}
 extern HDC			hDC;
 extern HWND			hwnd;
 extern HGLRC		hRC;
@@ -272,7 +332,7 @@ bool createglwindow(char* title, int width, int height, int bits, bool fullscree
 			PFD_SUPPORT_OPENGL |                                        // FORMAT MUST SUPPORT OPENGL
 			PFD_DOUBLEBUFFER,											// MUST SUPPORT DOUBLE BUFFERING
 			PFD_TYPE_RGBA,												// request an rgba format
-			bits,														// select our color depth
+			static_cast<BYTE>(bits),														// select our color depth
 			0, 0, 0, 0, 0, 0,											// color bits ignored
 			0,															// no alpha buffer
 			0,															// shift bit ignored
@@ -457,33 +517,33 @@ winampVisModule* getModule(int which)
 // configuration. passed this_mod, as a "this" parameter. allows you to make one configuration
 // function that shares code for all your modules (you don't have to use it though, you can make
 // config1(), config2(), etc...)
-void config(struct winampVisModule* this_mod)
-{
-	MessageBox(this_mod->hwndParent, L"DarkVis OpenGL Beta 1.5 for Winamp\n"
-		"Copyright (C) 2001 by DarKnight (darknight@deltaeagle.net)\n\n"
-		"Diese Winamp-Erweiterung nutzt OpenGL. Alle OpenGL-Initialisierungsfunktionen sind von Jeff Molofee (NeHe) erstellt. Danke daran!\n\n"
-		"Wie man die Einstellungen ändert:\n\n"
-
-		//"H: Show this info during running the plugin\n"
-
-		"Nach Oben / Unten: Bewege dich in den Bildschirm hinein und hinaus\n"
-		"Links / Rechts: Erhöhe oder verringere die Hintergrundgeschwindigkeit\n"
-		"Leertaste: Setze die Hintergrundgeschwindigkeit auf Standard zurück\n"
-		"Numpad 4: Titel Zurück\n"
-		"Numpad 6: Titel Vor\n"
-		"A: Aktiviere / Deaktiviere Anti-Aliasing\n"
-		"N: Aktiviere / Deaktiviere Peaks\n"
-		"Numpad 2 / Numpad 8: Erhöhe / Verringere die Fallgeschwindigkeit der Peaks\n"
-		"B: Modus wechseln\n"
-		"Y: Spektraldaten-Graph (Standard) / Wellenform-Graph\n"
-		"X: Zeige Linien zwischen den Graphen / Deaktiviere Linien zwischen den Graphen\n"
-		"Bild Hoch / Runter: Erhöhe / Verringere die Anzahl dieser Linien\n"
-		"C: Standard Graphfarbe / Zufällige Graphfarbe\n"
-		"V: Ändere die Farben des 'Wurmlochs'\n"
-		"T: Zeige den Namen des gespielten Titels an \n\n"
-		"Viel Spaß mit Ihrer Musik!\n\n"
-		"Die neueste Version finden Sie unter http://sourceforge.net/projects/darkvis/", L"Info", MB_OK);
-}
+//void config(struct winampVisModule* this_mod)
+//{
+//	MessageBox(this_mod->hwndParent, L"DarkVis OpenGL Beta 1.5 for Winamp\n"
+//		"Copyright (C) 2001 by DarKnight (darknight@deltaeagle.net)\n\n"
+//		"Diese Winamp-Erweiterung nutzt OpenGL. Alle OpenGL-Initialisierungsfunktionen sind von Jeff Molofee (NeHe) erstellt. Danke daran!\n\n"
+//		"Wie man die Einstellungen ändert:\n\n"
+//
+//		//"H: Show this info during running the plugin\n"
+//
+//		"Nach Oben / Unten: Bewege dich in den Bildschirm hinein und hinaus\n"
+//		"Links / Rechts: Erhöhe oder verringere die Hintergrundgeschwindigkeit\n"
+//		"Leertaste: Setze die Hintergrundgeschwindigkeit auf Standard zurück\n"
+//		"Numpad 4: Titel Zurück\n"
+//		"Numpad 6: Titel Vor\n"
+//		"A: Aktiviere / Deaktiviere Anti-Aliasing\n"
+//		"N: Aktiviere / Deaktiviere Peaks\n"
+//		"Numpad 2 / Numpad 8: Erhöhe / Verringere die Fallgeschwindigkeit der Peaks\n"
+//		"B: Modus wechseln\n"
+//		"Y: Spektraldaten-Graph (Standard) / Wellenform-Graph\n"
+//		"X: Zeige Linien zwischen den Graphen / Deaktiviere Linien zwischen den Graphen\n"
+//		"Bild Hoch / Runter: Erhöhe / Verringere die Anzahl dieser Linien\n"
+//		"C: Standard Graphfarbe / Zufällige Graphfarbe\n"
+//		"V: Ändere die Farben des 'Wurmlochs'\n"
+//		"T: Zeige den Namen des gespielten Titels an \n\n"
+//		"Viel Spaß mit Ihrer Musik!\n\n"
+//		"Die neueste Version finden Sie unter http://sourceforge.net/projects/darkvis/", L"Info", MB_OK);
+//}
 
 //------------------------------------------------------------------------------
 
@@ -509,8 +569,13 @@ void config_getinifn(struct winampVisModule* this_mod, char* ini_file)
 	strcat(ini_file, "DarkVis.ini");
 }
 
-//Лесен der Einstellungen
 
+// Безопасный конвертер char* → wchar_t*
+// outBuffer — твой буфер, outSize — его размер В ШИРОКИХ СИМВОЛАХ (не байтах)
+void CharToWide(const char* src, wchar_t* dest, size_t destSize) {
+	if (!src || !dest || destSize == 0) return;
+	MultiByteToWideChar(CP_ACP, 0, src, -1, dest, static_cast<int>(destSize));
+}
 void config_read(struct winampVisModule* this_mod)
 {
 	char ini_file[MAX_PATH];
@@ -520,8 +585,8 @@ void config_read(struct winampVisModule* this_mod)
 	config_getinifn(this_mod, ini_file);
 
 	// Преобразуем ini_file и this_mod->description в wchar_t*
-	CharToWChar(ini_file, w_ini_file, MAX_PATH);
-	CharToWChar(this_mod->description, w_section, 256);
+	CharToWide(ini_file, w_ini_file, MAX_PATH);
+	CharToWide(this_mod->description, w_section, 256);
 
 	config_x = GetPrivateProfileIntW(w_section, L"Screen_x", config_x, w_ini_file);
 	config_y = GetPrivateProfileIntW(w_section, L"Screen_y", config_y, w_ini_file);
